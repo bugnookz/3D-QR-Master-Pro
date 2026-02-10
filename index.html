@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D QR Master Pro (SVG & JPG)</title>
+    <title>3D QR Master Pro (QR Only - No Base)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
-        :root { --primary: #6366f1; --bg: #f8fafc; --success: #10b981; --warning: #f59e0b; }
+        :root { --primary: #6366f1; --bg: #f8fafc; --success: #10b981; --warning: #f59e0b; --purple: #8b5cf6; }
         body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--bg); display: flex; justify-content: center; padding: 20px; color: #1e293b; }
         .card { background: white; padding: 2rem; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); width: 100%; max-width: 500px; }
         h2 { margin-top: 0; color: #334155; text-align: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; }
@@ -21,6 +21,8 @@
         .download-group { display: none; margin-top: 15px; border-top: 1px solid #f1f5f9; padding-top: 15px; }
         .btn-svg { background: var(--success); color: white; }
         .btn-jpg { background: var(--warning); color: white; }
+        .btn-stl { background: var(--purple); color: white; }
+        
         #svg-preview-area { margin-top: 20px; display: flex; flex-direction: column; align-items: center; border: 2px dashed #e2e8f0; border-radius: 12px; padding: 20px; background: #fff; min-height: 200px; justify-content: center; }
         #qrcode-hidden { display: none; }
         .hint { font-size: 12px; color: #94a3b8; margin-top: 10px; text-align: center; }
@@ -69,16 +71,20 @@
     </div>
     
     <div class="download-group" id="download-group">
-        <button class="btn-svg" onclick="downloadSVG()">📂 ดาวน์โหลด .SVG (สำหรับ 3D Print)</button>
-        <button class="btn-jpg" onclick="downloadJPG()">🖼️ ดาวน์โหลด .JPG (สำหรับใช้งานทั่วไป)</button>
+        <button class="btn-stl" onclick="downloadSTL()">🧊 ดาวน์โหลด .STL (เฉพาะ QR Code)</button>
+        <button class="btn-svg" onclick="downloadSVG()">📂 ดาวน์โหลด .SVG</button>
+        <button class="btn-jpg" onclick="downloadJPG()">🖼️ ดาวน์โหลด .JPG</button>
     </div>
     
     <div id="qrcode-hidden"></div>
     <canvas id="canvas-export" style="display:none;"></canvas>
-    <p class="hint">* ใช้ไฟล์ SVG เมื่อต้องการนำไปดึงนูนในโปรแกรม 3D ออกแบบและสร้างระบบโดย wasantakan</p>
+    <p class="hint">* STL: เฉพาะตัว QR (ไม่มีฐาน) หนา 1.2mm<br>ออกแบบและสร้างระบบโดย wasantakan</p>
 </div>
 
 <script>
+    let qrMatrix = [];
+    let qrSize = 0;
+
     function toggleFields() {
         const type = document.getElementById('type-select').value;
         document.getElementById('field-text').style.display = type === 'text' ? 'block' : 'none';
@@ -110,14 +116,22 @@
         });
 
         setTimeout(() => {
-            const nCount = qrObj._oQRCode.getModuleCount();
-            const svgSize = 1000; // ทำเผื่อละเอียดๆ
-            const cellSize = svgSize / nCount;
+            qrSize = qrObj._oQRCode.getModuleCount();
+            qrMatrix = [];
+            for (let r = 0; r < qrSize; r++) {
+                qrMatrix[r] = [];
+                for (let c = 0; c < qrSize; c++) {
+                    qrMatrix[r][c] = qrObj._oQRCode.isDark(r, c);
+                }
+            }
+
+            const svgSize = 1000;
+            const cellSize = svgSize / qrSize;
             let pathData = "";
 
-            for (let row = 0; row < nCount; row++) {
-                for (let col = 0; col < nCount; col++) {
-                    if (qrObj._oQRCode.isDark(row, col)) {
+            for (let row = 0; row < qrSize; row++) {
+                for (let col = 0; col < qrSize; col++) {
+                    if (qrMatrix[row][col]) {
                         const x = col * cellSize;
                         const y = row * cellSize;
                         pathData += `M${x.toFixed(2)},${y.toFixed(2)} h${cellSize.toFixed(2)} v${cellSize.toFixed(2)} h-${cellSize.toFixed(2)} z `;
@@ -135,13 +149,69 @@
         }, 100);
     }
 
+    // --- ส่วนที่แก้ไข: สร้าง STL แบบชิ้นเดียว (เฉพาะ QR ไม่มีฐาน) ---
+    function downloadSTL() {
+        if (qrMatrix.length === 0) return alert("กรุณาสร้าง QR Code ก่อน");
+
+        const scale = 2.0;         // ขนาดต่อจุด (mm)
+        const thickness = 1.2;     // ความหนาตัว QR (mm)
+        
+        // ฟังก์ชันสร้าง string ของหน้าตัด (Facet)
+        const makeFacet = (v1, v2, v3) => {
+            return `  facet normal 0 0 0\n    outer loop\n      vertex ${v1}\n      vertex ${v2}\n      vertex ${v3}\n    endloop\n  endfacet\n`;
+        };
+
+        // ฟังก์ชันสร้าง string ของกล่อง (Cube)
+        const createBoxString = (x, y, zStart, zEnd, w, h) => {
+            const x1 = (x * scale).toFixed(3);
+            const x2 = ((x + w) * scale).toFixed(3);
+            const y1 = (y * scale).toFixed(3);
+            const y2 = ((y + h) * scale).toFixed(3);
+            const z1 = zStart.toFixed(3);
+            const z2 = zEnd.toFixed(3);
+
+            const p1=`${x1} ${y1} ${z1}`, p2=`${x2} ${y1} ${z1}`, p3=`${x2} ${y2} ${z1}`, p4=`${x1} ${y2} ${z1}`;
+            const p5=`${x1} ${y1} ${z2}`, p6=`${x2} ${y1} ${z2}`, p7=`${x2} ${y2} ${z2}`, p8=`${x1} ${y2} ${z2}`;
+
+            let s = "";
+            s += makeFacet(p1, p2, p3) + makeFacet(p1, p3, p4); // Bottom
+            s += makeFacet(p5, p7, p6) + makeFacet(p5, p8, p7); // Top
+            s += makeFacet(p1, p5, p2) + makeFacet(p2, p5, p6); // Front
+            s += makeFacet(p2, p6, p3) + makeFacet(p3, p6, p7); // Right
+            s += makeFacet(p3, p7, p4) + makeFacet(p4, p7, p8); // Back
+            s += makeFacet(p4, p8, p1) + makeFacet(p1, p8, p5); // Left
+            return s;
+        };
+
+        // เริ่มสร้างเนื้อหา STL (รวมทุกจุดเป็น solid เดียวกันชื่อ QRCode)
+        let stlContent = "solid QRCode\n";
+
+        for (let r = 0; r < qrSize; r++) {
+            for (let c = 0; c < qrSize; c++) {
+                if (qrMatrix[r][c]) {
+                    // สร้างเฉพาะจุดดำ
+                    // เริ่มที่ z=0 สูงขึ้นไปเท่ากับ thickness
+                    stlContent += createBoxString(c, (qrSize - 1 - r), 0, thickness, 1, 1);
+                }
+            }
+        }
+        
+        stlContent += "endsolid QRCode\n";
+
+        const blob = new Blob([stlContent], { type: 'text/plain' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = "QR_Code_NoBase.stl";
+        a.click();
+    }
+
     function downloadSVG() {
         const svgData = document.getElementById('main-svg').outerHTML;
         const blob = new Blob([svgData], {type: 'image/svg+xml'});
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `3D-QR-Print.svg`;
+        a.download = `3D-QR-Code.svg`;
         a.click();
     }
 
@@ -149,8 +219,6 @@
         const svgElement = document.getElementById('main-svg');
         const canvas = document.getElementById('canvas-export');
         const ctx = canvas.getContext('2d');
-        
-        // ตั้งความละเอียด JPG ให้สูง (2000x2000 px)
         canvas.width = 2000;
         canvas.height = 2000;
 
@@ -163,7 +231,6 @@
             ctx.fillStyle = "white";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            
             const jpgUrl = canvas.toDataURL("image/jpeg", 0.9);
             const a = document.createElement('a');
             a.href = jpgUrl;
