@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D QR Master Pro (QR Only - No Base)</title>
+    <title>3D QR Master Pro (PromptPay Edition)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
-        :root { --primary: #6366f1; --bg: #f8fafc; --success: #10b981; --warning: #f59e0b; --purple: #8b5cf6; }
+        :root { --primary: #6366f1; --bg: #f8fafc; --success: #10b981; --warning: #f59e0b; --purple: #8b5cf6; --blue: #3b82f6; }
         body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--bg); display: flex; justify-content: center; padding: 20px; color: #1e293b; }
         .card { background: white; padding: 2rem; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); width: 100%; max-width: 500px; }
         h2 { margin-top: 0; color: #334155; text-align: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; }
@@ -26,6 +26,9 @@
         #svg-preview-area { margin-top: 20px; display: flex; flex-direction: column; align-items: center; border: 2px dashed #e2e8f0; border-radius: 12px; padding: 20px; background: #fff; min-height: 200px; justify-content: center; }
         #qrcode-hidden { display: none; }
         .hint { font-size: 12px; color: #94a3b8; margin-top: 10px; text-align: center; }
+        
+        /* PromptPay Style */
+        .pp-header { background: #eef2ff; color: #1e3a8a; padding: 10px; border-radius: 8px; font-size: 0.9em; margin-bottom: 10px; border: 1px solid #c7d2fe; }
     </style>
 </head>
 <body>
@@ -37,6 +40,7 @@
         <label>1. เลือกประเภทข้อมูล</label>
         <select id="type-select" onchange="toggleFields()">
             <option value="text">🌐 เว็บไซต์ / ข้อความ</option>
+            <option value="promptpay">💰 พร้อมเพย์ (PromptPay)</option>
             <option value="wifi">📶 รหัสผ่าน Wi-Fi</option>
             <option value="vcard">📇 นามบัตร (vCard)</option>
         </select>
@@ -45,6 +49,18 @@
     <div id="field-text" class="form-group">
         <label>Link หรือ ข้อความ</label>
         <input type="text" id="input-text" placeholder="https://www.google.com">
+    </div>
+
+    <div id="field-promptpay" style="display:none;">
+        <div class="pp-header">ℹ️ รองรับเบอร์โทรศัพท์ (08x...) และเลขบัตรประชาชน (13 หลัก)</div>
+        <div class="form-group">
+            <label>เบอร์โทร หรือ เลขบัตรประชาชน</label>
+            <input type="text" id="pp-id" placeholder="ตัวอย่าง: 0812345678" maxlength="13">
+        </div>
+        <div class="form-group">
+            <label>จำนวนเงิน (บาท) *ไม่ระบุได้</label>
+            <input type="number" id="pp-amount" placeholder="ตัวอย่าง: 100.00" step="0.01">
+        </div>
     </div>
 
     <div id="field-wifi" style="display:none;">
@@ -78,7 +94,7 @@
     
     <div id="qrcode-hidden"></div>
     <canvas id="canvas-export" style="display:none;"></canvas>
-    <p class="hint">* STL: เฉพาะตัว QR (ไม่มีฐาน) หนา 1.2mm<br>ออกแบบและสร้างระบบโดย wasantakan</p>
+    <p class="hint">* STL: เฉพาะตัว QR (ไม่มีฐาน) หนา 1.2mm<br>ออกแบบและสร้างระบบโดย wasantakan & Gemini</p>
 </div>
 
 <script>
@@ -88,18 +104,79 @@
     function toggleFields() {
         const type = document.getElementById('type-select').value;
         document.getElementById('field-text').style.display = type === 'text' ? 'block' : 'none';
+        document.getElementById('field-promptpay').style.display = type === 'promptpay' ? 'block' : 'none';
         document.getElementById('field-wifi').style.display = type === 'wifi' ? 'block' : 'none';
         document.getElementById('field-vcard').style.display = type === 'vcard' ? 'block' : 'none';
     }
+
+    // --- ส่วนเสริม: ฟังก์ชันสร้าง PromptPay String และ CRC16 ---
+    function crc16(data) {
+        let crc = 0xFFFF;
+        for (let i = 0; i < data.length; i++) {
+            let x = ((crc >> 8) ^ data.charCodeAt(i)) & 0xFF;
+            x ^= x >> 4;
+            crc = ((crc << 8) ^ (x << 12) ^ (x << 5) ^ x) & 0xFFFF;
+        }
+        return crc.toString(16).toUpperCase().padStart(4, '0');
+    }
+
+    function generatePromptPayPayload(target, amount) {
+        let targetSanitized = target.replace(/[^0-9]/g, '');
+        let targetType = "";
+
+        if (targetSanitized.length === 10 && targetSanitized.startsWith('0')) {
+            targetType = "01"; // Phone
+            // แก้ไข: ต้องมี 00 นำหน้า 66 (รหัสประเทศ)
+            targetSanitized = "0066" + targetSanitized.substring(1); 
+        } else if (targetSanitized.length === 13) {
+            targetType = "02"; // ID Card
+        } else {
+            alert("เบอร์โทรหรือเลขบัตรประชาชนไม่ถูกต้อง");
+            return null;
+        }
+
+        const f = (id, val) => id + val.length.toString().padStart(2, '0') + val;
+        
+        // Build Payload
+        let payload = "";
+        payload += f("00", "01"); // Version
+        payload += f("01", amount ? "12" : "11"); // Method (11=static, 12=amount)
+        
+        let merchantInfo = f("00", "A000000677010111") + f(targetType, targetSanitized);
+        payload += f("29", merchantInfo);
+        
+        payload += f("53", "764"); // Currency THB
+        payload += f("58", "TH");  // Country
+
+        if (amount) {
+            payload += f("54", parseFloat(amount).toFixed(2));
+        }
+
+        payload += "6304"; // Checksum ID + Length
+        payload += crc16(payload); // Append calculated CRC
+
+        return payload;
+    }
+    // ----------------------------------------------------
 
     function generate() {
         const type = document.getElementById('type-select').value;
         let finalData = "";
 
-        if(type === 'text') finalData = document.getElementById('input-text').value;
+        if(type === 'text') {
+            finalData = document.getElementById('input-text').value;
+        } 
+        else if (type === 'promptpay') {
+            const ppId = document.getElementById('pp-id').value;
+            const ppAmount = document.getElementById('pp-amount').value;
+            if(!ppId) return alert("กรุณากรอกเบอร์โทรหรือเลขบัตรประชาชน");
+            finalData = generatePromptPayPayload(ppId, ppAmount);
+            if(!finalData) return; // Error in promptpay gen
+        }
         else if(type === 'wifi') {
             finalData = `WIFI:S:${document.getElementById('wifi-ssid').value || "WiFi"};T:${document.getElementById('wifi-enc').value};P:${document.getElementById('wifi-pass').value || ""};;`;
-        } else if(type === 'vcard') {
+        } 
+        else if(type === 'vcard') {
             finalData = `BEGIN:VCARD\nVERSION:3.0\nN:${document.getElementById('vc-name').value || "User"}\nTEL:${document.getElementById('vc-tel').value || ""}\nEMAIL:${document.getElementById('vc-email').value || ""}\nEND:VCARD`;
         }
 
@@ -112,7 +189,7 @@
             text: finalData,
             width: 256,
             height: 256,
-            correctLevel: QRCode.CorrectLevel.H
+            correctLevel: QRCode.CorrectLevel.M 
         });
 
         setTimeout(() => {
@@ -149,19 +226,17 @@
         }, 100);
     }
 
-    // --- ส่วนที่แก้ไข: สร้าง STL แบบชิ้นเดียว (เฉพาะ QR ไม่มีฐาน) ---
+    // --- ส่วนสร้าง STL (เหมือนเดิม) ---
     function downloadSTL() {
         if (qrMatrix.length === 0) return alert("กรุณาสร้าง QR Code ก่อน");
 
-        const scale = 2.0;         // ขนาดต่อจุด (mm)
-        const thickness = 1.2;     // ความหนาตัว QR (mm)
+        const scale = 2.0;         
+        const thickness = 1.2;     
         
-        // ฟังก์ชันสร้าง string ของหน้าตัด (Facet)
         const makeFacet = (v1, v2, v3) => {
             return `  facet normal 0 0 0\n    outer loop\n      vertex ${v1}\n      vertex ${v2}\n      vertex ${v3}\n    endloop\n  endfacet\n`;
         };
 
-        // ฟังก์ชันสร้าง string ของกล่อง (Cube)
         const createBoxString = (x, y, zStart, zEnd, w, h) => {
             const x1 = (x * scale).toFixed(3);
             const x2 = ((x + w) * scale).toFixed(3);
@@ -174,23 +249,20 @@
             const p5=`${x1} ${y1} ${z2}`, p6=`${x2} ${y1} ${z2}`, p7=`${x2} ${y2} ${z2}`, p8=`${x1} ${y2} ${z2}`;
 
             let s = "";
-            s += makeFacet(p1, p2, p3) + makeFacet(p1, p3, p4); // Bottom
-            s += makeFacet(p5, p7, p6) + makeFacet(p5, p8, p7); // Top
-            s += makeFacet(p1, p5, p2) + makeFacet(p2, p5, p6); // Front
-            s += makeFacet(p2, p6, p3) + makeFacet(p3, p6, p7); // Right
-            s += makeFacet(p3, p7, p4) + makeFacet(p4, p7, p8); // Back
-            s += makeFacet(p4, p8, p1) + makeFacet(p1, p8, p5); // Left
+            s += makeFacet(p1, p2, p3) + makeFacet(p1, p3, p4); 
+            s += makeFacet(p5, p7, p6) + makeFacet(p5, p8, p7); 
+            s += makeFacet(p1, p5, p2) + makeFacet(p2, p5, p6); 
+            s += makeFacet(p2, p6, p3) + makeFacet(p3, p6, p7); 
+            s += makeFacet(p3, p7, p4) + makeFacet(p4, p7, p8); 
+            s += makeFacet(p4, p8, p1) + makeFacet(p1, p8, p5); 
             return s;
         };
 
-        // เริ่มสร้างเนื้อหา STL (รวมทุกจุดเป็น solid เดียวกันชื่อ QRCode)
         let stlContent = "solid QRCode\n";
 
         for (let r = 0; r < qrSize; r++) {
             for (let c = 0; c < qrSize; c++) {
                 if (qrMatrix[r][c]) {
-                    // สร้างเฉพาะจุดดำ
-                    // เริ่มที่ z=0 สูงขึ้นไปเท่ากับ thickness
                     stlContent += createBoxString(c, (qrSize - 1 - r), 0, thickness, 1, 1);
                 }
             }
@@ -201,7 +273,7 @@
         const blob = new Blob([stlContent], { type: 'text/plain' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = "QR_Code_NoBase.stl";
+        a.download = "QR_PromptPay_NoBase.stl";
         a.click();
     }
 
@@ -211,7 +283,7 @@
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `3D-QR-Code.svg`;
+        a.download = `3D-QR-PromptPay.svg`;
         a.click();
     }
 
@@ -234,7 +306,7 @@
             const jpgUrl = canvas.toDataURL("image/jpeg", 0.9);
             const a = document.createElement('a');
             a.href = jpgUrl;
-            a.download = `QR-Preview.jpg`;
+            a.download = `QR-PromptPay.jpg`;
             a.click();
             URL.revokeObjectURL(url);
         };
