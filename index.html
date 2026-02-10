@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D QR Master Pro (SVG & JPG)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        :root { --primary: #6366f1; --bg: #f8fafc; --success: #10b981; --warning: #f59e0b; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--bg); display: flex; justify-content: center; padding: 20px; color: #1e293b; }
+        .card { background: white; padding: 2rem; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); width: 100%; max-width: 500px; }
+        h2 { margin-top: 0; color: #334155; text-align: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 10px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: 600; font-size: 0.9rem; color: #64748b; }
+        select, input { width: 100%; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px; box-sizing: border-box; font-size: 14px; transition: 0.2s; }
+        select:focus, input:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1); }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        button { width: 100%; padding: 12px; margin-top: 10px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .btn-gen { background: var(--primary); color: white; }
+        .btn-gen:hover { background: #4f46e5; }
+        .download-group { display: none; margin-top: 15px; border-top: 1px solid #f1f5f9; padding-top: 15px; }
+        .btn-svg { background: var(--success); color: white; }
+        .btn-jpg { background: var(--warning); color: white; }
+        #svg-preview-area { margin-top: 20px; display: flex; flex-direction: column; align-items: center; border: 2px dashed #e2e8f0; border-radius: 12px; padding: 20px; background: #fff; min-height: 200px; justify-content: center; }
+        #qrcode-hidden { display: none; }
+        .hint { font-size: 12px; color: #94a3b8; margin-top: 10px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>3D QR Generator Pro</h2>
+    
+    <div class="form-group">
+        <label>1. เลือกประเภทข้อมูล</label>
+        <select id="type-select" onchange="toggleFields()">
+            <option value="text">🌐 เว็บไซต์ / ข้อความ</option>
+            <option value="wifi">📶 รหัสผ่าน Wi-Fi</option>
+            <option value="vcard">📇 นามบัตร (vCard)</option>
+        </select>
+    </div>
+
+    <div id="field-text" class="form-group">
+        <label>Link หรือ ข้อความ</label>
+        <input type="text" id="input-text" placeholder="https://www.google.com">
+    </div>
+
+    <div id="field-wifi" style="display:none;">
+        <div class="form-group"><label>ชื่อ Wi-Fi (SSID)</label><input type="text" id="wifi-ssid"></div>
+        <div class="form-group"><label>รหัสผ่าน</label><input type="password" id="wifi-pass"></div>
+        <div class="form-group">
+            <label>ความปลอดภัย</label>
+            <select id="wifi-enc"><option value="WPA">WPA/WPA2</option><option value="WEP">WEP</option><option value="nopass">None</option></select>
+        </div>
+    </div>
+
+    <div id="field-vcard" style="display:none;">
+        <div class="grid">
+            <div class="form-group"><label>ชื่อ</label><input type="text" id="vc-name"></div>
+            <div class="form-group"><label>เบอร์โทร</label><input type="text" id="vc-tel"></div>
+        </div>
+        <div class="form-group"><label>อีเมล</label><input type="email" id="vc-email"></div>
+    </div>
+
+    <button class="btn-gen" onclick="generate()">⚡ สร้าง QR Code</button>
+    
+    <div id="svg-preview-area">
+        <span id="preview-placeholder" style="color: #94a3b8;">พรีวิวจะปรากฏที่นี่</span>
+    </div>
+    
+    <div class="download-group" id="download-group">
+        <button class="btn-svg" onclick="downloadSVG()">📂 ดาวน์โหลด .SVG (สำหรับ 3D Print)</button>
+        <button class="btn-jpg" onclick="downloadJPG()">🖼️ ดาวน์โหลด .JPG (สำหรับใช้งานทั่วไป)</button>
+    </div>
+    
+    <div id="qrcode-hidden"></div>
+    <canvas id="canvas-export" style="display:none;"></canvas>
+    <p class="hint">* ใช้ไฟล์ SVG เมื่อต้องการนำไปดึงนูนในโปรแกรม 3D ออกแบบและสร้างระบบโดย wasantakan</p>
+</div>
+
+<script>
+    function toggleFields() {
+        const type = document.getElementById('type-select').value;
+        document.getElementById('field-text').style.display = type === 'text' ? 'block' : 'none';
+        document.getElementById('field-wifi').style.display = type === 'wifi' ? 'block' : 'none';
+        document.getElementById('field-vcard').style.display = type === 'vcard' ? 'block' : 'none';
+    }
+
+    function generate() {
+        const type = document.getElementById('type-select').value;
+        let finalData = "";
+
+        if(type === 'text') finalData = document.getElementById('input-text').value;
+        else if(type === 'wifi') {
+            finalData = `WIFI:S:${document.getElementById('wifi-ssid').value || "WiFi"};T:${document.getElementById('wifi-enc').value};P:${document.getElementById('wifi-pass').value || ""};;`;
+        } else if(type === 'vcard') {
+            finalData = `BEGIN:VCARD\nVERSION:3.0\nN:${document.getElementById('vc-name').value || "User"}\nTEL:${document.getElementById('vc-tel').value || ""}\nEMAIL:${document.getElementById('vc-email').value || ""}\nEND:VCARD`;
+        }
+
+        if(!finalData) return alert("กรุณากรอกข้อมูล");
+
+        const hidden = document.getElementById('qrcode-hidden');
+        hidden.innerHTML = "";
+        
+        const qrObj = new QRCode(hidden, {
+            text: finalData,
+            width: 256,
+            height: 256,
+            correctLevel: QRCode.CorrectLevel.H
+        });
+
+        setTimeout(() => {
+            const nCount = qrObj._oQRCode.getModuleCount();
+            const svgSize = 1000; // ทำเผื่อละเอียดๆ
+            const cellSize = svgSize / nCount;
+            let pathData = "";
+
+            for (let row = 0; row < nCount; row++) {
+                for (let col = 0; col < nCount; col++) {
+                    if (qrObj._oQRCode.isDark(row, col)) {
+                        const x = col * cellSize;
+                        const y = row * cellSize;
+                        pathData += `M${x.toFixed(2)},${y.toFixed(2)} h${cellSize.toFixed(2)} v${cellSize.toFixed(2)} h-${cellSize.toFixed(2)} z `;
+                    }
+                }
+            }
+
+            const svgFinal = `<svg id="main-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${svgSize} ${svgSize}" width="250" height="250">
+                <rect width="${svgSize}" height="${svgSize}" fill="white"/>
+                <path d="${pathData}" fill="black"/>
+            </svg>`;
+
+            document.getElementById('svg-preview-area').innerHTML = svgFinal;
+            document.getElementById('download-group').style.display = 'block';
+        }, 100);
+    }
+
+    function downloadSVG() {
+        const svgData = document.getElementById('main-svg').outerHTML;
+        const blob = new Blob([svgData], {type: 'image/svg+xml'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `3D-QR-Print.svg`;
+        a.click();
+    }
+
+    function downloadJPG() {
+        const svgElement = document.getElementById('main-svg');
+        const canvas = document.getElementById('canvas-export');
+        const ctx = canvas.getContext('2d');
+        
+        // ตั้งความละเอียด JPG ให้สูง (2000x2000 px)
+        canvas.width = 2000;
+        canvas.height = 2000;
+
+        const svgData = new XMLSerializer().serializeToString(svgElement);
+        const img = new Image();
+        const svgBlob = new Blob([svgData], {type: 'image/svg+xml;charset=utf-8'});
+        const url = URL.createObjectURL(svgBlob);
+
+        img.onload = function() {
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            
+            const jpgUrl = canvas.toDataURL("image/jpeg", 0.9);
+            const a = document.createElement('a');
+            a.href = jpgUrl;
+            a.download = `QR-Preview.jpg`;
+            a.click();
+            URL.revokeObjectURL(url);
+        };
+        img.src = url;
+    }
+</script>
+
+</body>
+</html>
